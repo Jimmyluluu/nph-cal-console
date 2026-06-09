@@ -957,7 +957,7 @@ const startAnalysis = async () => {
                     </Badge>
                   </div>
 
-                  <div class="grid gap-3 lg:grid-cols-[0.85fr_1.1fr_1.05fr]">
+                  <div class="grid gap-3 lg:grid-cols-[0.85fr_1.05fr_1.1fr]">
                     <div
                       v-for="indicator in primaryIndicatorCards"
                       :key="indicator.key"
