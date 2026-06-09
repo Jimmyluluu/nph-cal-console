@@ -19,8 +19,9 @@ import {
   XIcon,
 } from '@lucide/vue'
 
-type ImagingKind = 'DICOM' | 'NIfTI' | 'ZIP'
+type ImagingKind = 'NIfTI' | 'ZIP'
 type UploadStatus = 'queued' | 'signing' | 'uploading' | 'uploaded' | 'failed'
+type AnalysisStatus = 'idle' | 'segmenting' | 'calculating' | 'completed' | 'failed'
 
 interface PresignedUploadResponse {
   data?: {
@@ -43,25 +44,38 @@ interface ImagingFile {
 }
 
 const uploadApiBaseUrl = 'https://nph-s3-api.lujimmy.com'
-const acceptedExtensions = '.dcm,.nii,.nii.gz,.zip'
+const analysisApiBaseUrl = 'https://nph-api.lujimmy.com'
+const acceptedExtensions = '.nii,.nii.gz,.zip'
 const files = ref<ImagingFile[]>([])
 const isDragging = ref(false)
 const isUploading = ref(false)
 const isCompressing = ref(false)
 const compressionProgress = ref(0)
 const errorMessage = ref('')
+const analysisStatus = ref<AnalysisStatus>('idle')
+const analysisError = ref('')
+const segmentationResult = ref<Record<string, unknown> | null>(null)
+const indicatorResult = ref<Record<string, unknown> | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
 
 const totalSize = computed(() => files.value.reduce((size, item) => size + item.file.size, 0))
-const dicomCount = computed(() => files.value.filter((item) => item.kind === 'DICOM').length)
 const niftiCount = computed(() => files.value.filter((item) => item.kind === 'NIfTI').length)
 const zipCount = computed(() => files.value.filter((item) => item.kind === 'ZIP').length)
 const hasFiles = computed(() => files.value.length > 0)
+const selectedCase = computed(() => files.value[0])
 const uploadedCount = computed(() => files.value.filter((item) => item.status === 'uploaded').length)
 const uploadableFiles = computed(() =>
   files.value.filter((item) => item.status !== 'uploaded' && item.status !== 'signing' && item.status !== 'uploading'),
 )
+const isAnalyzing = computed(() => analysisStatus.value === 'segmenting' || analysisStatus.value === 'calculating')
+const canStartAnalysis = computed(() => {
+  const item = selectedCase.value
+
+  return Boolean(item?.key && item.status === 'uploaded' && !isUploading.value && !isAnalyzing.value)
+})
+const segmentationEntries = computed(() => Object.entries(segmentationResult.value ?? {}))
+const indicatorEntries = computed(() => Object.entries(indicatorResult.value ?? {}))
 const uploadProgress = computed(() => {
   if (!hasFiles.value) {
     return 0
@@ -74,10 +88,6 @@ const uploadProgress = computed(() => {
 
 const detectImagingKind = (fileName: string): ImagingKind | null => {
   const normalizedName = fileName.toLowerCase()
-
-  if (normalizedName.endsWith('.dcm')) {
-    return 'DICOM'
-  }
 
   if (normalizedName.endsWith('.nii') || normalizedName.endsWith('.nii.gz')) {
     return 'NIfTI'
@@ -111,7 +121,100 @@ const getContentType = (file: File, kind: ImagingKind) => {
     return 'application/zip'
   }
 
-  return kind === 'DICOM' ? 'application/dicom' : 'application/octet-stream'
+  return 'application/octet-stream'
+}
+
+const resetAnalysis = () => {
+  analysisStatus.value = 'idle'
+  analysisError.value = ''
+  segmentationResult.value = null
+  indicatorResult.value = null
+}
+
+const formatResultLabel = (key: string) => {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/-/g, ' ')
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+}
+
+const formatResultValue = (value: unknown): string => {
+  if (typeof value === 'number') {
+    return Number.isInteger(value) ? String(value) : value.toFixed(4)
+  }
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (typeof value === 'boolean') {
+    return value ? 'true' : 'false'
+  }
+
+  if (value === null || value === undefined) {
+    return '-'
+  }
+
+  return JSON.stringify(value)
+}
+
+const getRecordValue = (record: Record<string, unknown>, keys: string[]) => {
+  for (const key of keys) {
+    const value = record[key]
+
+    if (typeof value === 'string' && value.trim()) {
+      return value
+    }
+  }
+
+  return ''
+}
+
+const getCaseDirFromSegmentation = (payload: Record<string, unknown>) => {
+  const directValue = getRecordValue(payload, ['case_dir', 'output_dir', 'result_dir', 'caseDir', 'outputDir', 'resultDir'])
+
+  if (directValue) {
+    return directValue
+  }
+
+  const nestedKeys = ['data', 'result', 'results']
+
+  for (const key of nestedKeys) {
+    const nestedValue = payload[key]
+
+    if (nestedValue && typeof nestedValue === 'object' && !Array.isArray(nestedValue)) {
+      const caseDir = getRecordValue(nestedValue as Record<string, unknown>, [
+        'case_dir',
+        'output_dir',
+        'result_dir',
+        'caseDir',
+        'outputDir',
+        'resultDir',
+      ])
+
+      if (caseDir) {
+        return caseDir
+      }
+    }
+  }
+
+  return ''
+}
+
+const postJson = async (path: string, body: Record<string, unknown>) => {
+  const response = await fetch(`${analysisApiBaseUrl}${path}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  })
+
+  if (!response.ok) {
+    throw new Error(`分析 API 失敗：HTTP ${response.status}`)
+  }
+
+  return (await response.json()) as Record<string, unknown>
 }
 
 const sanitizeZipName = (folderName: string) => {
@@ -148,6 +251,46 @@ const getStatusVariant = (status: UploadStatus) => {
   }
 
   return 'outline'
+}
+
+const getAnalysisStatusLabel = (status: AnalysisStatus) => {
+  const labels: Record<AnalysisStatus, string> = {
+    idle: '等待分析',
+    segmenting: '分割中',
+    calculating: '計算指標中',
+    completed: '分析完成',
+    failed: '分析失敗',
+  }
+
+  return labels[status]
+}
+
+const getAnalysisHint = () => {
+  if (!hasFiles.value) {
+    return '請先加入一個 ZIP 或 NIfTI 案例。'
+  }
+
+  if (selectedCase.value?.status !== 'uploaded') {
+    return '案例上傳到 R2 後即可開始分析。'
+  }
+
+  if (analysisStatus.value === 'segmenting') {
+    return '正在由後端讀取 R2 檔案並產生分割結果。'
+  }
+
+  if (analysisStatus.value === 'calculating') {
+    return '分割完成，正在計算 NPH 指標。'
+  }
+
+  if (analysisStatus.value === 'completed') {
+    return '已完成分割與全部指標計算。'
+  }
+
+  if (analysisStatus.value === 'failed') {
+    return analysisError.value || '分析失敗，可以確認 API 狀態後重試。'
+  }
+
+  return '已上傳完成，可以開始單案分析。'
 }
 
 const requestPresignedUpload = async (file: File, contentType: string) => {
@@ -228,6 +371,7 @@ const uploadAllFiles = async () => {
     return
   }
 
+  resetAnalysis()
   isUploading.value = true
   errorMessage.value = ''
 
@@ -239,8 +383,14 @@ const uploadAllFiles = async () => {
 }
 
 const addFiles = (candidateFiles: File[]) => {
+  if (files.value.length) {
+    errorMessage.value = '一次只能分析一個案例，請先清除目前案例。'
+    return
+  }
+
   const validFiles: ImagingFile[] = []
   const invalidNames: string[] = []
+  let skippedValidCount = 0
 
   for (const file of candidateFiles) {
     const kind = detectImagingKind(file.name)
@@ -251,10 +401,14 @@ const addFiles = (candidateFiles: File[]) => {
     }
 
     const id = `${file.name}-${file.size}-${file.lastModified}`
-    const alreadySelected = files.value.some((item) => item.id === id)
     const alreadyQueued = validFiles.some((item) => item.id === id)
 
-    if (!alreadySelected && !alreadyQueued) {
+    if (validFiles.length || alreadyQueued) {
+      skippedValidCount += 1
+      continue
+    }
+
+    if (!alreadyQueued) {
       validFiles.push({
         id,
         file,
@@ -266,10 +420,22 @@ const addFiles = (candidateFiles: File[]) => {
     }
   }
 
-  files.value = [...files.value, ...validFiles]
-  errorMessage.value = invalidNames.length
-    ? `已略過不支援的檔案：${invalidNames.join(', ')}`
-    : ''
+  if (validFiles.length) {
+    resetAnalysis()
+    files.value = validFiles
+  }
+
+  const messages: string[] = []
+
+  if (invalidNames.length) {
+    messages.push(`已略過不支援的檔案：${invalidNames.join(', ')}`)
+  }
+
+  if (skippedValidCount) {
+    messages.push('一次只能分析一個案例，已只加入第一個 ZIP 或 NIfTI。')
+  }
+
+  errorMessage.value = messages.join('；')
 }
 
 const openFilePicker = () => {
@@ -291,6 +457,11 @@ const handleFolderChange = async (event: Event) => {
   const folderFiles = Array.from(input.files ?? [])
 
   input.value = ''
+
+  if (files.value.length) {
+    errorMessage.value = '一次只能分析一個案例，請先清除目前案例。'
+    return
+  }
 
   if (!folderFiles.length || isCompressing.value || isUploading.value) {
     return
@@ -329,8 +500,13 @@ const handleFolderChange = async (event: Event) => {
     })
     const id = `${zipFile.name}-${zipFile.size}-${zipFile.lastModified}`
 
+    if (files.value.length) {
+      errorMessage.value = '一次只能分析一個案例，請先清除目前案例。'
+      return
+    }
+
+    resetAnalysis()
     files.value = [
-      ...files.value,
       {
         id,
         file: zipFile,
@@ -361,15 +537,52 @@ const removeFile = (id: string) => {
   }
 
   files.value = files.value.filter((item) => item.id !== id)
+  resetAnalysis()
 }
 
 const clearFiles = () => {
-  if (isUploading.value) {
+  if (isUploading.value || isAnalyzing.value) {
     return
   }
 
   files.value = []
   errorMessage.value = ''
+  resetAnalysis()
+}
+
+const startAnalysis = async () => {
+  const item = selectedCase.value
+
+  if (!item?.key || item.status !== 'uploaded' || isAnalyzing.value) {
+    return
+  }
+
+  resetAnalysis()
+  analysisStatus.value = 'segmenting'
+
+  try {
+    const segmentationPayload = await postJson('/segmentation/patient', {
+      r2_key: item.key,
+      output_dir: 'results',
+      skip_existing: false,
+    })
+
+    segmentationResult.value = segmentationPayload
+    const caseDir = getCaseDirFromSegmentation(segmentationPayload)
+
+    if (!caseDir) {
+      throw new Error('分割完成，但回應缺少 case_dir / output_dir / result_dir，無法計算指標。')
+    }
+
+    analysisStatus.value = 'calculating'
+    indicatorResult.value = await postJson('/indicators/calculate-all', {
+      case_dir: caseDir,
+    })
+    analysisStatus.value = 'completed'
+  } catch (error) {
+    analysisStatus.value = 'failed'
+    analysisError.value = error instanceof Error ? error.message : '分析失敗'
+  }
 }
 </script>
 
@@ -383,21 +596,17 @@ const clearFiles = () => {
           </Badge>
           <div class="space-y-2">
             <h1 class="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl lg:text-5xl">
-              上傳 3D 腦部影像資料
+              上傳並分析單一 3D 腦部案例
             </h1>
             <p class="text-base leading-7 text-slate-600 sm:text-lg">
-              支援 DICOM <span class="font-medium text-slate-900">folder/.dcm</span> 與 NIfTI <span class="font-medium text-slate-900">.nii/.nii.gz</span>。整個資料夾會先在瀏覽器端壓縮成 ZIP，再上傳到 R2。
+              一次只處理一個案例。支援整個 DICOM folder 壓成 <span class="font-medium text-slate-900">.zip</span>，或直接上傳 <span class="font-medium text-slate-900">.zip/.nii/.nii.gz</span>。
             </p>
           </div>
         </div>
-        <div class="grid grid-cols-2 gap-2 rounded-2xl border bg-white/80 p-2 text-center shadow-sm sm:grid-cols-4">
+        <div class="grid grid-cols-3 gap-2 rounded-2xl border bg-white/80 p-2 text-center shadow-sm">
           <div class="rounded-xl bg-slate-950 px-4 py-3 text-white">
             <p class="text-2xl font-semibold">{{ files.length }}</p>
-            <p class="text-xs text-slate-300">檔案</p>
-          </div>
-          <div class="rounded-xl bg-slate-100 px-4 py-3">
-            <p class="text-2xl font-semibold text-slate-950">{{ dicomCount }}</p>
-            <p class="text-xs text-slate-500">DICOM</p>
+            <p class="text-xs text-slate-300">案例</p>
           </div>
           <div class="rounded-xl bg-slate-100 px-4 py-3">
             <p class="text-2xl font-semibold text-slate-950">{{ niftiCount }}</p>
@@ -415,10 +624,10 @@ const clearFiles = () => {
           <CardHeader>
             <CardTitle class="flex items-center gap-2 text-2xl">
               <UploadCloudIcon class="size-6 text-sky-600" />
-              影像檔案上傳
+              單案例上傳
             </CardTitle>
             <CardDescription>
-              可以選擇單檔，也可以選擇整個 DICOM folder。資料夾會保留相對路徑並壓縮成單一 ZIP。
+              可以選擇一個 NIfTI/ZIP 檔，也可以選擇整個 DICOM folder 並壓縮成單一 ZIP。
             </CardDescription>
           </CardHeader>
           <CardContent class="space-y-5">
@@ -436,7 +645,7 @@ const clearFiles = () => {
                 </div>
                 <h2 class="text-2xl font-semibold text-slate-950">選擇你的 3D 影像來源</h2>
                 <p class="text-sm leading-6 text-slate-500">
-                  系統會自動判斷：資料夾先壓縮成 ZIP；已壓縮 ZIP、NIfTI 或單一 DICOM 直接加入上傳清單。
+                  系統會強制單一案例：資料夾先壓縮成 ZIP；已壓縮 ZIP 或 NIfTI 直接加入上傳清單。
                 </p>
               </div>
 
@@ -444,7 +653,7 @@ const clearFiles = () => {
                 <button
                   type="button"
                   class="group rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
-                  :disabled="isCompressing || isUploading"
+                  :disabled="isCompressing || isUploading || isAnalyzing"
                   @click="openFolderPicker"
                 >
                   <span class="mb-4 grid size-12 place-items-center rounded-2xl bg-sky-100 text-sky-700 transition group-hover:bg-sky-600 group-hover:text-white">
@@ -462,7 +671,7 @@ const clearFiles = () => {
                 <button
                   type="button"
                   class="group rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
-                  :disabled="isCompressing || isUploading"
+                  :disabled="isCompressing || isUploading || isAnalyzing"
                   @click="openFilePicker"
                 >
                   <span class="mb-4 grid size-12 place-items-center rounded-2xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white">
@@ -470,9 +679,9 @@ const clearFiles = () => {
                   </span>
                   <span class="block text-lg font-semibold text-slate-950">我已經有檔案或壓縮檔</span>
                   <span class="mt-2 block text-sm leading-6 text-slate-600">
-                    支援 .zip、.nii、.nii.gz、.dcm。已壓縮的 ZIP 不會再壓縮，會直接上傳到 R2。
+                    支援 .zip、.nii、.nii.gz。已壓縮的 ZIP 不會再壓縮，會直接上傳到 R2。
                   </span>
-                  <span class="mt-4 inline-flex text-sm font-medium text-slate-900">選擇 ZIP / NIfTI / DICOM</span>
+                  <span class="mt-4 inline-flex text-sm font-medium text-slate-900">選擇 ZIP / NIfTI</span>
                 </button>
               </div>
 
@@ -484,7 +693,7 @@ const clearFiles = () => {
               </div>
 
               <p class="mt-4 text-center text-xs text-slate-500">
-                也可以把已壓縮 ZIP、NIfTI 或單一 DICOM 直接拖拉到這個區塊。
+                也可以把已壓縮 ZIP 或 NIfTI 直接拖拉到這個區塊。
               </p>
             </div>
 
@@ -493,7 +702,6 @@ const clearFiles = () => {
               class="sr-only"
               type="file"
               :accept="acceptedExtensions"
-              multiple
               @change="handleFileChange"
             >
 
@@ -516,18 +724,18 @@ const clearFiles = () => {
                 <div class="flex flex-wrap items-center gap-2 text-sm text-slate-600">
                   <Badge variant="secondary">總大小 {{ formatFileSize(totalSize) }}</Badge>
                   <Badge variant="outline">已上傳 {{ uploadedCount }}/{{ files.length }}</Badge>
-                  <Badge variant="outline">資料夾會壓縮成 ZIP</Badge>
+                  <Badge variant="outline">單一案例</Badge>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                   <Button
                     v-if="hasFiles"
                     type="button"
-                    :disabled="!uploadableFiles.length || isUploading || isCompressing"
+                    :disabled="!uploadableFiles.length || isUploading || isCompressing || isAnalyzing"
                     @click="uploadAllFiles"
                   >
                     {{ isUploading ? '上傳中...' : '上傳到 R2' }}
                   </Button>
-                  <Button v-if="hasFiles" type="button" variant="outline" :disabled="isUploading" @click="clearFiles">
+                  <Button v-if="hasFiles" type="button" variant="outline" :disabled="isUploading || isAnalyzing" @click="clearFiles">
                     清除全部
                   </Button>
                 </div>
@@ -563,7 +771,7 @@ const clearFiles = () => {
                   <p v-if="item.key" class="truncate text-xs text-emerald-700">R2 key: {{ item.key }}</p>
                   <p v-if="item.error" class="text-xs text-red-600">{{ item.error }}</p>
                 </div>
-                <Badge :variant="item.kind === 'DICOM' ? 'outline' : 'secondary'">
+                <Badge variant="secondary">
                   {{ item.kind }}
                 </Badge>
                 <Badge :variant="getStatusVariant(item.status)">
@@ -583,7 +791,7 @@ const clearFiles = () => {
             </div>
 
             <div v-else class="rounded-2xl border bg-white/70 p-5 text-sm leading-6 text-slate-500">
-              尚未選取檔案。若要建立 3D 腦部模型，通常需要完整 DICOM series 或單一 NIfTI volume。
+              尚未選取案例。請加入一個 DICOM folder、ZIP、NIfTI volume。
             </div>
           </CardContent>
         </Card>
@@ -592,39 +800,105 @@ const clearFiles = () => {
           <CardHeader>
             <CardTitle class="flex items-center gap-2 text-2xl text-white">
               <BrainIcon class="size-6 text-sky-300" />
-              3D 腦部檢視器
+              單案分析結果
             </CardTitle>
             <CardDescription class="text-slate-400">
-              目前先保留呈現區，後續可接 volume rendering、切片瀏覽或 DICOM/NIfTI 解析流程。
+              上傳完成後會呼叫分割 API，再計算全部 NPH 指標。
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div class="relative grid min-h-[520px] place-items-center overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.22),_transparent_36%),linear-gradient(160deg,_#0f172a,_#020617)] p-6">
+            <div class="relative min-h-[520px] overflow-hidden rounded-3xl border border-white/10 bg-[radial-gradient(circle_at_center,_rgba(56,189,248,0.22),_transparent_36%),linear-gradient(160deg,_#0f172a,_#020617)] p-6">
               <div class="absolute inset-x-10 top-12 h-px bg-gradient-to-r from-transparent via-sky-300/40 to-transparent" />
               <div class="absolute inset-y-10 left-12 w-px bg-gradient-to-b from-transparent via-sky-300/30 to-transparent" />
               <div class="absolute bottom-10 right-8 h-28 w-28 rounded-full border border-sky-300/20" />
               <div class="absolute bottom-20 right-20 h-52 w-52 rounded-full border border-sky-300/10" />
 
-              <div class="relative z-10 flex max-w-sm flex-col items-center gap-5 text-center">
-                <div class="grid size-28 place-items-center rounded-[2rem] border border-sky-200/20 bg-white/10 shadow-2xl shadow-sky-500/20 backdrop-blur">
-                  <Layers3Icon class="size-12 text-sky-200" />
+              <div class="relative z-10 flex flex-col gap-5">
+                <div class="flex flex-col gap-4 rounded-[2rem] border border-sky-200/20 bg-white/10 p-5 shadow-2xl shadow-sky-500/20 backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                  <div class="flex items-center gap-4">
+                    <div class="grid size-16 shrink-0 place-items-center rounded-2xl bg-sky-300/15 text-sky-200">
+                      <Layers3Icon class="size-8" />
+                    </div>
+                    <div class="space-y-1">
+                      <p class="text-sm text-slate-400">分析狀態</p>
+                      <h2 class="text-2xl font-semibold tracking-tight text-white">
+                        {{ getAnalysisStatusLabel(analysisStatus) }}
+                      </h2>
+                      <p class="text-sm leading-6 text-slate-300">
+                        {{ getAnalysisHint() }}
+                      </p>
+                    </div>
+                  </div>
+                  <Button
+                    type="button"
+                    class="bg-sky-300 text-slate-950 hover:bg-sky-200"
+                    :disabled="!canStartAnalysis"
+                    @click="startAnalysis"
+                  >
+                    {{ isAnalyzing ? '分析中...' : analysisStatus === 'completed' ? '重新分析' : '開始分析' }}
+                  </Button>
                 </div>
-                <div class="space-y-2">
-                  <h2 class="text-2xl font-semibold tracking-tight">等待載入 3D brain volume</h2>
-                  <p class="text-sm leading-6 text-slate-300">
-                    選取檔案後，這裡會作為未來顯示 3D 腦部、切片與量測結果的主區塊。
-                  </p>
-                </div>
-                <div class="grid w-full grid-cols-2 gap-3 text-left text-sm">
+
+                <div class="grid gap-3 text-left text-sm sm:grid-cols-3">
                   <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
-                    <p class="text-slate-400">狀態</p>
-                    <p class="font-medium text-white">{{ isUploading ? '上傳到 R2 中' : hasFiles ? '檔案已就緒' : '等待上傳' }}</p>
+                    <p class="text-slate-400">案例</p>
+                    <p class="truncate font-medium text-white">{{ selectedCase?.file.name || '尚未選取' }}</p>
                   </div>
                   <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
                     <p class="text-slate-400">R2</p>
                     <p class="font-medium text-white">{{ uploadedCount }} 已上傳</p>
                   </div>
+                  <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                    <p class="text-slate-400">API</p>
+                    <p class="font-medium text-white">{{ isAnalyzing ? '執行中' : '待命' }}</p>
+                  </div>
                 </div>
+
+                <div v-if="isAnalyzing" class="space-y-3 rounded-2xl border border-sky-300/20 bg-sky-300/10 p-4">
+                  <div class="flex items-center justify-between text-sm">
+                    <span class="font-medium text-sky-100">{{ getAnalysisStatusLabel(analysisStatus) }}</span>
+                    <span class="text-sky-200">請稍候</span>
+                  </div>
+                  <div class="h-2 overflow-hidden rounded-full bg-white/10">
+                    <div
+                      class="h-full rounded-full bg-sky-300 transition-all"
+                      :style="{ width: analysisStatus === 'segmenting' ? '45%' : '78%' }"
+                    />
+                  </div>
+                </div>
+
+                <p v-if="analysisError" class="rounded-2xl border border-red-300/30 bg-red-500/10 px-4 py-3 text-sm leading-6 text-red-100">
+                  {{ analysisError }}
+                </p>
+
+                <div v-if="indicatorEntries.length" class="space-y-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <h3 class="text-lg font-semibold text-white">NPH 指標</h3>
+                    <Badge variant="outline" class="border-sky-200/30 bg-white/10 text-sky-100">
+                      {{ indicatorEntries.length }} 筆結果
+                    </Badge>
+                  </div>
+                  <div class="grid gap-3 sm:grid-cols-2">
+                    <div
+                      v-for="[key, value] in indicatorEntries"
+                      :key="key"
+                      class="rounded-2xl border border-white/10 bg-white/10 p-4"
+                    >
+                      <p class="text-xs uppercase tracking-wide text-slate-400">{{ formatResultLabel(key) }}</p>
+                      <p class="mt-2 break-words text-lg font-semibold text-white">{{ formatResultValue(value) }}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <details v-if="segmentationEntries.length" class="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                  <summary class="cursor-pointer font-medium text-white">分割 API 回應</summary>
+                  <div class="mt-3 space-y-2">
+                    <div v-for="[key, value] in segmentationEntries" :key="key" class="grid gap-1">
+                      <span class="text-slate-500">{{ formatResultLabel(key) }}</span>
+                      <span class="break-words text-slate-200">{{ formatResultValue(value) }}</span>
+                    </div>
+                  </div>
+                </details>
               </div>
             </div>
           </CardContent>
