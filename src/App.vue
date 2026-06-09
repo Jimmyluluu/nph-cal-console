@@ -970,9 +970,9 @@ const startAnalysis = async () => {
                           <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
                         </div>
                         <div>
-                          <div class="flex min-w-0 items-end gap-2">
-                            <p class="break-all text-3xl font-semibold tracking-tight text-white sm:text-4xl">{{ indicator.value }}</p>
-                            <p v-if="indicator.unit" class="pb-2 text-sm font-medium text-slate-400">{{ indicator.unit }}</p>
+                          <div class="flex min-w-0 flex-wrap items-end gap-x-2 gap-y-1">
+                            <p class="break-all text-2xl font-semibold tracking-tight text-white sm:text-3xl">{{ indicator.value }}</p>
+                            <p v-if="indicator.unit" class="pb-1 text-xs font-medium text-slate-400">{{ indicator.unit }}</p>
                           </div>
                           <p v-if="indicator.percent" class="mt-2 text-sm font-medium text-emerald-200">
                             {{ indicator.percent }}
@@ -1001,7 +1001,7 @@ const startAnalysis = async () => {
                             <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
                           </div>
                           <div class="shrink-0 text-left sm:text-right">
-                            <p class="break-all text-2xl font-semibold tracking-tight text-white sm:text-3xl">{{ indicator.value }}</p>
+                            <p class="break-all text-xl font-semibold tracking-tight text-white sm:text-2xl">{{ indicator.value }}</p>
                             <p v-if="indicator.unit" class="mt-1 text-xs font-medium text-slate-500">{{ indicator.unit }}</p>
                           </div>
                         </div>
