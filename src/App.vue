@@ -46,6 +46,7 @@ interface ImagingFile {
 interface IndicatorCardItem {
   key: string
   title: string
+  description: string
   value: string
   unit?: string
   percent?: string
@@ -64,17 +65,25 @@ const indicatorOrder = [
   'evan_index',
   'alvi',
   'callosal_angle',
-  'surface_area',
   'volume',
+  'surface_area',
   'csf_minus_ventricle',
 ]
 const indicatorTitles: Record<string, string> = {
   evan_index: 'Evan Index',
-  surface_area: 'Surface Area',
-  volume: 'Volume',
-  csf_minus_ventricle: 'CSF - Ventricle',
   alvi: 'ALVI',
   callosal_angle: 'Callosal Angle',
+  volume: '體積',
+  surface_area: '表面積',
+  csf_minus_ventricle: '腦室外水',
+}
+const indicatorDescriptions: Record<string, string> = {
+  evan_index: '額角寬度 / 顱腔寬度',
+  alvi: '腦室前後徑 / 顱骨前後徑',
+  callosal_angle: '胼胝體角度量測',
+  volume: '左右腦室體積加總',
+  surface_area: '左右腦室表面積加總',
+  csf_minus_ventricle: 'CSF 扣除腦室聯集體積',
 }
 const indicatorDetailLabels: Record<string, string> = {
   anterior_horn_distance_mm: 'Anterior horn distance',
@@ -130,6 +139,8 @@ const indicatorCards = computed<IndicatorCardItem[]>(() => {
       return (leftIndex === -1 ? indicatorOrder.length : leftIndex) - (rightIndex === -1 ? indicatorOrder.length : rightIndex)
     })
 })
+const primaryIndicatorCards = computed(() => indicatorCards.value.slice(0, 3))
+const volumeIndicatorCards = computed(() => indicatorCards.value.slice(3))
 const uploadProgress = computed(() => {
   if (!hasFiles.value) {
     return 0
@@ -221,6 +232,8 @@ const formatMetricValue = (value: unknown): string => {
 
 const getIndicatorTitle = (key: string) => indicatorTitles[key] ?? formatResultLabel(key)
 
+const getIndicatorDescription = (key: string) => indicatorDescriptions[key] ?? 'NPH 量測結果'
+
 const getIndicatorDetailLabel = (key: string) => indicatorDetailLabels[key] ?? formatResultLabel(key)
 
 const asRecord = (value: unknown) => {
@@ -244,6 +257,7 @@ const createIndicatorCard = (key: string, value: unknown): IndicatorCardItem => 
   return {
     key,
     title: getIndicatorTitle(key),
+    description: getIndicatorDescription(key),
     value: formatMetricValue(rawValue),
     unit,
     percent,
@@ -930,46 +944,71 @@ const startAnalysis = async () => {
                   {{ analysisError }}
                 </p>
 
-                <div v-if="indicatorCards.length" class="space-y-3">
-                  <div class="flex items-center justify-between gap-3">
-                    <h3 class="text-lg font-semibold text-white">NPH 指標</h3>
+                <div v-if="indicatorCards.length" class="space-y-5">
+                  <div class="flex items-end justify-between gap-3">
+                    <div>
+                      <p class="text-sm font-medium text-sky-200">Analysis Output</p>
+                      <h3 class="text-2xl font-semibold tracking-tight text-white">NPH 量測總覽</h3>
+                    </div>
                     <Badge variant="outline" class="border-sky-200/30 bg-white/10 text-sky-100">
-                      {{ indicatorCards.length }} 筆結果
+                      {{ indicatorCards.length }} indicators
                     </Badge>
                   </div>
-                  <div class="grid gap-3 xl:grid-cols-2">
+
+                  <div class="grid gap-3 lg:grid-cols-3">
                     <div
-                      v-for="indicator in indicatorCards"
+                      v-for="indicator in primaryIndicatorCards"
                       :key="indicator.key"
-                      class="overflow-hidden rounded-2xl border border-white/10 bg-white/10 shadow-lg shadow-black/10"
+                      class="rounded-[1.75rem] border border-sky-200/20 bg-gradient-to-br from-white/18 to-sky-300/8 p-5 shadow-xl shadow-sky-950/20"
                     >
-                      <div class="border-b border-white/10 bg-white/5 p-4">
-                        <div class="flex items-start justify-between gap-3">
-                          <div>
-                            <p class="text-xs uppercase tracking-wide text-sky-200/80">{{ indicator.key }}</p>
-                            <h4 class="mt-1 text-base font-semibold text-white">{{ indicator.title }}</h4>
-                          </div>
-                          <Badge v-if="indicator.percent" variant="outline" class="border-emerald-200/30 bg-emerald-300/10 text-emerald-100">
-                            {{ indicator.percent }}
-                          </Badge>
+                      <div class="flex min-h-32 flex-col justify-between gap-5">
+                        <div class="space-y-1">
+                          <p class="text-xs uppercase tracking-[0.2em] text-sky-100/70">{{ indicator.key }}</p>
+                          <h4 class="text-lg font-semibold text-white">{{ indicator.title }}</h4>
+                          <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
                         </div>
-                        <div class="mt-4 flex items-end gap-2">
-                          <p class="text-4xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
-                          <p v-if="indicator.unit" class="pb-1 text-sm font-medium text-slate-400">{{ indicator.unit }}</p>
+                        <div>
+                          <div class="flex items-end gap-2">
+                            <p class="text-5xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
+                            <p v-if="indicator.unit" class="pb-2 text-sm font-medium text-slate-400">{{ indicator.unit }}</p>
+                          </div>
+                          <p v-if="indicator.percent" class="mt-2 text-sm font-medium text-emerald-200">
+                            {{ indicator.percent }}
+                          </p>
                         </div>
                       </div>
+                    </div>
+                  </div>
 
-                      <div class="space-y-3 p-4">
-                        <p v-if="indicator.formula" class="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-xs leading-5 text-slate-300">
-                          <span class="text-slate-500">Formula</span>
-                          <span class="mt-1 block break-words font-mono text-sky-100">{{ indicator.formula }}</span>
-                        </p>
+                  <div class="space-y-3">
+                    <div class="flex items-center justify-between gap-3 border-t border-white/10 pt-5">
+                      <h4 class="text-base font-semibold text-white">量體結果</h4>
+                      <p class="text-xs text-slate-500">體積 / 表面積 / 腦室外水</p>
+                    </div>
 
-                        <div v-if="indicator.details.length" class="grid gap-2 sm:grid-cols-2">
+                    <div class="grid gap-3">
+                      <div
+                        v-for="indicator in volumeIndicatorCards"
+                        :key="indicator.key"
+                        class="rounded-2xl border border-white/10 bg-slate-950/35 p-4"
+                      >
+                        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                          <div class="space-y-1">
+                            <p class="text-xs uppercase tracking-[0.18em] text-slate-500">{{ indicator.key }}</p>
+                            <h5 class="text-lg font-semibold text-white">{{ indicator.title }}</h5>
+                            <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
+                          </div>
+                          <div class="shrink-0 text-left sm:text-right">
+                            <p class="text-3xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
+                            <p v-if="indicator.unit" class="mt-1 text-xs font-medium text-slate-500">{{ indicator.unit }}</p>
+                          </div>
+                        </div>
+
+                        <div v-if="indicator.details.length" class="mt-4 grid gap-2 sm:grid-cols-3">
                           <div
                             v-for="detail in indicator.details"
                             :key="`${indicator.key}-${detail.key}`"
-                            class="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2"
+                            class="rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2"
                           >
                             <p class="text-xs text-slate-500">{{ detail.label }}</p>
                             <p class="mt-1 break-words text-sm font-medium text-slate-100">{{ detail.value }}</p>
