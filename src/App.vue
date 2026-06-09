@@ -3,6 +3,7 @@ import JSZip from 'jszip'
 import { computed, ref } from 'vue'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import taiwanIcon from '@/assets/台灣.png'
 import {
   Card,
   CardContent,
@@ -664,8 +665,9 @@ const startAnalysis = async () => {
     <section class="mx-auto flex max-w-7xl flex-col gap-6">
       <div class="flex flex-col gap-4 rounded-3xl border border-white/70 bg-white/70 p-6 shadow-sm backdrop-blur md:flex-row md:items-end md:justify-between">
         <div class="max-w-3xl space-y-3">
-          <Badge variant="outline" class="bg-white/80">
-            NPH Cal Console
+          <Badge variant="outline" class="gap-2 bg-white/80 py-1.5 pr-3 pl-2">
+            <img :src="taiwanIcon" alt="" class="size-5 rounded-full object-cover">
+            水腦症影像特徵計算平台
           </Badge>
           <div class="space-y-2">
             <h1 class="text-3xl font-semibold tracking-tight text-slate-950 sm:text-4xl lg:text-5xl">
@@ -734,7 +736,7 @@ const startAnalysis = async () => {
                   </span>
                   <span class="block text-lg font-semibold text-slate-950">我有一整個 folder</span>
                   <span class="mt-2 block text-sm leading-6 text-slate-600">
-                    適合 DICOM series 或多檔組成的 3D 影像。會保留相對路徑，先壓縮成 .zip 再上傳。
+                    適合 DICOM series，會壓縮成 .zip 再上傳。
                   </span>
                   <span class="mt-4 inline-flex text-sm font-medium text-sky-700">
                     {{ isCompressing ? `壓縮中 ${compressionProgress}%` : '選擇資料夾，自動壓縮' }}
@@ -968,8 +970,8 @@ const startAnalysis = async () => {
                           <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
                         </div>
                         <div>
-                          <div class="flex items-end gap-2">
-                            <p class="text-5xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
+                          <div class="flex min-w-0 items-end gap-2">
+                            <p class="break-all text-3xl font-semibold tracking-tight text-white sm:text-4xl">{{ indicator.value }}</p>
                             <p v-if="indicator.unit" class="pb-2 text-sm font-medium text-slate-400">{{ indicator.unit }}</p>
                           </div>
                           <p v-if="indicator.percent" class="mt-2 text-sm font-medium text-emerald-200">
@@ -999,7 +1001,7 @@ const startAnalysis = async () => {
                             <p class="text-xs leading-5 text-slate-400">{{ indicator.description }}</p>
                           </div>
                           <div class="shrink-0 text-left sm:text-right">
-                            <p class="text-3xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
+                            <p class="break-all text-2xl font-semibold tracking-tight text-white sm:text-3xl">{{ indicator.value }}</p>
                             <p v-if="indicator.unit" class="mt-1 text-xs font-medium text-slate-500">{{ indicator.unit }}</p>
                           </div>
                         </div>
