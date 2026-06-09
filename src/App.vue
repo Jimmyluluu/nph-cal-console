@@ -43,9 +43,53 @@ interface ImagingFile {
   error?: string
 }
 
+interface IndicatorCardItem {
+  key: string
+  title: string
+  value: string
+  unit?: string
+  percent?: string
+  formula?: string
+  details: Array<{
+    key: string
+    label: string
+    value: string
+  }>
+}
+
 const uploadApiBaseUrl = 'https://nph-s3-api.lujimmy.com'
 const analysisApiBaseUrl = 'https://nph-api.lujimmy.com'
 const acceptedExtensions = '.nii,.nii.gz,.zip'
+const indicatorOrder = [
+  'evan_index',
+  'alvi',
+  'callosal_angle',
+  'surface_area',
+  'volume_surface_ratio',
+  'csf_minus_ventricle',
+]
+const indicatorTitles: Record<string, string> = {
+  evan_index: 'Evan Index',
+  surface_area: 'Surface Area',
+  volume_surface_ratio: 'Volume / Surface Ratio',
+  csf_minus_ventricle: 'CSF - Ventricle',
+  alvi: 'ALVI',
+  callosal_angle: 'Callosal Angle',
+}
+const indicatorDetailLabels: Record<string, string> = {
+  anterior_horn_distance_mm: 'Anterior horn distance',
+  cranial_width_mm: 'Cranial width',
+  left_surface_area: 'Left surface area',
+  right_surface_area: 'Right surface area',
+  total_volume: 'Total volume',
+  total_surface_area: 'Total surface area',
+  csf_volume: 'CSF volume',
+  ventricle_union_volume: 'Ventricle union volume',
+  ventricle_ap_diameter_mm: 'Ventricle AP diameter',
+  skull_ap_diameter_mm: 'Skull AP diameter',
+  method: 'Method',
+  angle_method: 'Angle method',
+}
 const files = ref<ImagingFile[]>([])
 const isDragging = ref(false)
 const isUploading = ref(false)
@@ -76,6 +120,16 @@ const canStartAnalysis = computed(() => {
 })
 const analysisEntries = computed(() => Object.entries(analysisResult.value ?? {}))
 const indicatorEntries = computed(() => Object.entries(indicatorResult.value ?? {}))
+const indicatorCards = computed<IndicatorCardItem[]>(() => {
+  return indicatorEntries.value
+    .map(([key, value]) => createIndicatorCard(key, value))
+    .sort((left, right) => {
+      const leftIndex = indicatorOrder.indexOf(left.key)
+      const rightIndex = indicatorOrder.indexOf(right.key)
+
+      return (leftIndex === -1 ? indicatorOrder.length : leftIndex) - (rightIndex === -1 ? indicatorOrder.length : rightIndex)
+    })
+})
 const uploadProgress = computed(() => {
   if (!hasFiles.value) {
     return 0
@@ -158,8 +212,50 @@ const formatResultValue = (value: unknown): string => {
   return JSON.stringify(value)
 }
 
+const formatMetricValue = (value: unknown): string => {
+  if (typeof value !== 'number') {
+    return formatResultValue(value)
+  }
+
+  const fractionDigits = Math.abs(value) >= 100 ? 1 : 3
+
+  return value
+    .toFixed(fractionDigits)
+    .replace(/\.0+$/, '')
+    .replace(/(\.\d*?)0+$/, '$1')
+}
+
+const getIndicatorTitle = (key: string) => indicatorTitles[key] ?? formatResultLabel(key)
+
+const getIndicatorDetailLabel = (key: string) => indicatorDetailLabels[key] ?? formatResultLabel(key)
+
 const asRecord = (value: unknown) => {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
+
+const createIndicatorCard = (key: string, value: unknown): IndicatorCardItem => {
+  const record = asRecord(value)
+  const rawValue = record?.value ?? value
+  const unit = typeof record?.unit === 'string' ? record.unit : undefined
+  const percent = typeof record?.percent === 'number' ? `${formatMetricValue(record.percent)}%` : undefined
+  const formula = typeof record?.formula === 'string' ? record.formula : undefined
+  const details = Object.entries(record ?? {})
+    .filter(([detailKey]) => !['value', 'unit', 'percent', 'formula'].includes(detailKey))
+    .map(([detailKey, detailValue]) => ({
+      key: detailKey,
+      label: getIndicatorDetailLabel(detailKey),
+      value: formatMetricValue(detailValue),
+    }))
+
+  return {
+    key,
+    title: getIndicatorTitle(key),
+    value: formatMetricValue(rawValue),
+    unit,
+    percent,
+    formula,
+    details,
+  }
 }
 
 const extractIndicatorResult = (payload: Record<string, unknown>): Record<string, unknown> => {
@@ -841,21 +937,52 @@ const startAnalysis = async () => {
                   {{ analysisError }}
                 </p>
 
-                <div v-if="indicatorEntries.length" class="space-y-3">
+                <div v-if="indicatorCards.length" class="space-y-3">
                   <div class="flex items-center justify-between gap-3">
                     <h3 class="text-lg font-semibold text-white">NPH 指標</h3>
                     <Badge variant="outline" class="border-sky-200/30 bg-white/10 text-sky-100">
-                      {{ indicatorEntries.length }} 筆結果
+                      {{ indicatorCards.length }} 筆結果
                     </Badge>
                   </div>
-                  <div class="grid gap-3 sm:grid-cols-2">
+                  <div class="grid gap-3 xl:grid-cols-2">
                     <div
-                      v-for="[key, value] in indicatorEntries"
-                      :key="key"
-                      class="rounded-2xl border border-white/10 bg-white/10 p-4"
+                      v-for="indicator in indicatorCards"
+                      :key="indicator.key"
+                      class="overflow-hidden rounded-2xl border border-white/10 bg-white/10 shadow-lg shadow-black/10"
                     >
-                      <p class="text-xs uppercase tracking-wide text-slate-400">{{ formatResultLabel(key) }}</p>
-                      <p class="mt-2 break-words text-lg font-semibold text-white">{{ formatResultValue(value) }}</p>
+                      <div class="border-b border-white/10 bg-white/5 p-4">
+                        <div class="flex items-start justify-between gap-3">
+                          <div>
+                            <p class="text-xs uppercase tracking-wide text-sky-200/80">{{ indicator.key }}</p>
+                            <h4 class="mt-1 text-base font-semibold text-white">{{ indicator.title }}</h4>
+                          </div>
+                          <Badge v-if="indicator.percent" variant="outline" class="border-emerald-200/30 bg-emerald-300/10 text-emerald-100">
+                            {{ indicator.percent }}
+                          </Badge>
+                        </div>
+                        <div class="mt-4 flex items-end gap-2">
+                          <p class="text-4xl font-semibold tracking-tight text-white">{{ indicator.value }}</p>
+                          <p v-if="indicator.unit" class="pb-1 text-sm font-medium text-slate-400">{{ indicator.unit }}</p>
+                        </div>
+                      </div>
+
+                      <div class="space-y-3 p-4">
+                        <p v-if="indicator.formula" class="rounded-xl border border-white/10 bg-slate-950/40 px-3 py-2 text-xs leading-5 text-slate-300">
+                          <span class="text-slate-500">Formula</span>
+                          <span class="mt-1 block break-words font-mono text-sky-100">{{ indicator.formula }}</span>
+                        </p>
+
+                        <div v-if="indicator.details.length" class="grid gap-2 sm:grid-cols-2">
+                          <div
+                            v-for="detail in indicator.details"
+                            :key="`${indicator.key}-${detail.key}`"
+                            class="rounded-xl border border-white/10 bg-slate-950/30 px-3 py-2"
+                          >
+                            <p class="text-xs text-slate-500">{{ detail.label }}</p>
+                            <p class="mt-1 break-words text-sm font-medium text-slate-100">{{ detail.value }}</p>
+                          </div>
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </div>
