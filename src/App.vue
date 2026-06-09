@@ -21,7 +21,7 @@ import {
 
 type ImagingKind = 'NIfTI' | 'ZIP'
 type UploadStatus = 'queued' | 'signing' | 'uploading' | 'uploaded' | 'failed'
-type AnalysisStatus = 'idle' | 'segmenting' | 'calculating' | 'completed' | 'failed'
+type AnalysisStatus = 'idle' | 'analyzing' | 'completed' | 'failed'
 
 interface PresignedUploadResponse {
   data?: {
@@ -54,7 +54,7 @@ const compressionProgress = ref(0)
 const errorMessage = ref('')
 const analysisStatus = ref<AnalysisStatus>('idle')
 const analysisError = ref('')
-const segmentationResult = ref<Record<string, unknown> | null>(null)
+const analysisResult = ref<Record<string, unknown> | null>(null)
 const indicatorResult = ref<Record<string, unknown> | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
@@ -68,13 +68,13 @@ const uploadedCount = computed(() => files.value.filter((item) => item.status ==
 const uploadableFiles = computed(() =>
   files.value.filter((item) => item.status !== 'uploaded' && item.status !== 'signing' && item.status !== 'uploading'),
 )
-const isAnalyzing = computed(() => analysisStatus.value === 'segmenting' || analysisStatus.value === 'calculating')
+const isAnalyzing = computed(() => analysisStatus.value === 'analyzing')
 const canStartAnalysis = computed(() => {
   const item = selectedCase.value
 
   return Boolean(item?.key && item.status === 'uploaded' && !isUploading.value && !isAnalyzing.value)
 })
-const segmentationEntries = computed(() => Object.entries(segmentationResult.value ?? {}))
+const analysisEntries = computed(() => Object.entries(analysisResult.value ?? {}))
 const indicatorEntries = computed(() => Object.entries(indicatorResult.value ?? {}))
 const uploadProgress = computed(() => {
   if (!hasFiles.value) {
@@ -127,7 +127,7 @@ const getContentType = (file: File, kind: ImagingKind) => {
 const resetAnalysis = () => {
   analysisStatus.value = 'idle'
   analysisError.value = ''
-  segmentationResult.value = null
+  analysisResult.value = null
   indicatorResult.value = null
 }
 
@@ -158,47 +158,31 @@ const formatResultValue = (value: unknown): string => {
   return JSON.stringify(value)
 }
 
-const getRecordValue = (record: Record<string, unknown>, keys: string[]) => {
-  for (const key of keys) {
-    const value = record[key]
+const asRecord = (value: unknown) => {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
+}
 
-    if (typeof value === 'string' && value.trim()) {
+const extractIndicatorResult = (payload: Record<string, unknown>): Record<string, unknown> => {
+  const indicatorKeys = ['indicators', 'indicator_results', 'indicatorResult', 'metrics', 'measurements']
+  const containerKeys = ['data', 'result', 'results']
+
+  for (const key of indicatorKeys) {
+    const value = asRecord(payload[key])
+
+    if (value) {
       return value
     }
   }
 
-  return ''
-}
+  for (const key of containerKeys) {
+    const value = asRecord(payload[key])
 
-const getCaseDirFromSegmentation = (payload: Record<string, unknown>) => {
-  const directValue = getRecordValue(payload, ['case_dir', 'output_dir', 'result_dir', 'caseDir', 'outputDir', 'resultDir'])
-
-  if (directValue) {
-    return directValue
-  }
-
-  const nestedKeys = ['data', 'result', 'results']
-
-  for (const key of nestedKeys) {
-    const nestedValue = payload[key]
-
-    if (nestedValue && typeof nestedValue === 'object' && !Array.isArray(nestedValue)) {
-      const caseDir = getRecordValue(nestedValue as Record<string, unknown>, [
-        'case_dir',
-        'output_dir',
-        'result_dir',
-        'caseDir',
-        'outputDir',
-        'resultDir',
-      ])
-
-      if (caseDir) {
-        return caseDir
-      }
+    if (value) {
+      return extractIndicatorResult(value)
     }
   }
 
-  return ''
+  return payload
 }
 
 const postJson = async (path: string, body: Record<string, unknown>) => {
@@ -256,8 +240,7 @@ const getStatusVariant = (status: UploadStatus) => {
 const getAnalysisStatusLabel = (status: AnalysisStatus) => {
   const labels: Record<AnalysisStatus, string> = {
     idle: '等待分析',
-    segmenting: '分割中',
-    calculating: '計算指標中',
+    analyzing: '分析中',
     completed: '分析完成',
     failed: '分析失敗',
   }
@@ -274,23 +257,19 @@ const getAnalysisHint = () => {
     return '案例上傳到 R2 後即可開始分析。'
   }
 
-  if (analysisStatus.value === 'segmenting') {
-    return '正在由後端讀取 R2 檔案並產生分割結果。'
-  }
-
-  if (analysisStatus.value === 'calculating') {
-    return '分割完成，正在計算 NPH 指標。'
+  if (analysisStatus.value === 'analyzing') {
+    return '正在由後端讀取 R2 檔案，執行分割並計算 NPH 指標。'
   }
 
   if (analysisStatus.value === 'completed') {
-    return '已完成分割與全部指標計算。'
+    return '已完成單案分析流程。'
   }
 
   if (analysisStatus.value === 'failed') {
     return analysisError.value || '分析失敗，可以確認 API 狀態後重試。'
   }
 
-  return '已上傳完成，可以開始單案分析。'
+  return '已上傳完成，可以呼叫單案分析流程。'
 }
 
 const requestPresignedUpload = async (file: File, contentType: string) => {
@@ -558,26 +537,17 @@ const startAnalysis = async () => {
   }
 
   resetAnalysis()
-  analysisStatus.value = 'segmenting'
+  analysisStatus.value = 'analyzing'
 
   try {
-    const segmentationPayload = await postJson('/segmentation/patient', {
+    const analysisPayload = await postJson('/segmentation/patient/analyze', {
       r2_key: item.key,
       output_dir: 'results',
       skip_existing: false,
     })
 
-    segmentationResult.value = segmentationPayload
-    const caseDir = getCaseDirFromSegmentation(segmentationPayload)
-
-    if (!caseDir) {
-      throw new Error('分割完成，但回應缺少 case_dir / output_dir / result_dir，無法計算指標。')
-    }
-
-    analysisStatus.value = 'calculating'
-    indicatorResult.value = await postJson('/indicators/calculate-all', {
-      case_dir: caseDir,
-    })
+    analysisResult.value = analysisPayload
+    indicatorResult.value = extractIndicatorResult(analysisPayload)
     analysisStatus.value = 'completed'
   } catch (error) {
     analysisStatus.value = 'failed'
@@ -803,7 +773,7 @@ const startAnalysis = async () => {
               單案分析結果
             </CardTitle>
             <CardDescription class="text-slate-400">
-              上傳完成後會呼叫分割 API，再計算全部 NPH 指標。
+              上傳完成後會呼叫單一 analyze API，取得分割與全部 NPH 指標。
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -862,7 +832,7 @@ const startAnalysis = async () => {
                   <div class="h-2 overflow-hidden rounded-full bg-white/10">
                     <div
                       class="h-full rounded-full bg-sky-300 transition-all"
-                      :style="{ width: analysisStatus === 'segmenting' ? '45%' : '78%' }"
+                      :style="{ width: '65%' }"
                     />
                   </div>
                 </div>
@@ -890,10 +860,10 @@ const startAnalysis = async () => {
                   </div>
                 </div>
 
-                <details v-if="segmentationEntries.length" class="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                  <summary class="cursor-pointer font-medium text-white">分割 API 回應</summary>
+                <details v-if="analysisEntries.length" class="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
+                  <summary class="cursor-pointer font-medium text-white">Analyze API 回應</summary>
                   <div class="mt-3 space-y-2">
-                    <div v-for="[key, value] in segmentationEntries" :key="key" class="grid gap-1">
+                    <div v-for="[key, value] in analysisEntries" :key="key" class="grid gap-1">
                       <span class="text-slate-500">{{ formatResultLabel(key) }}</span>
                       <span class="break-words text-slate-200">{{ formatResultValue(value) }}</span>
                     </div>
