@@ -65,13 +65,13 @@ const indicatorOrder = [
   'alvi',
   'callosal_angle',
   'surface_area',
-  'volume_surface_ratio',
+  'volume',
   'csf_minus_ventricle',
 ]
 const indicatorTitles: Record<string, string> = {
   evan_index: 'Evan Index',
   surface_area: 'Surface Area',
-  volume_surface_ratio: 'Volume / Surface Ratio',
+  volume: 'Volume',
   csf_minus_ventricle: 'CSF - Ventricle',
   alvi: 'ALVI',
   callosal_angle: 'Callosal Angle',
@@ -79,10 +79,12 @@ const indicatorTitles: Record<string, string> = {
 const indicatorDetailLabels: Record<string, string> = {
   anterior_horn_distance_mm: 'Anterior horn distance',
   cranial_width_mm: 'Cranial width',
+  total_surface_area: 'Total surface area',
   left_surface_area: 'Left surface area',
   right_surface_area: 'Right surface area',
   total_volume: 'Total volume',
-  total_surface_area: 'Total surface area',
+  left_volume: 'Left volume',
+  right_volume: 'Right volume',
   csf_volume: 'CSF volume',
   ventricle_union_volume: 'Ventricle union volume',
   ventricle_ap_diameter_mm: 'Ventricle AP diameter',
@@ -98,7 +100,6 @@ const compressionProgress = ref(0)
 const errorMessage = ref('')
 const analysisStatus = ref<AnalysisStatus>('idle')
 const analysisError = ref('')
-const analysisResult = ref<Record<string, unknown> | null>(null)
 const indicatorResult = ref<Record<string, unknown> | null>(null)
 const fileInput = ref<HTMLInputElement | null>(null)
 const folderInput = ref<HTMLInputElement | null>(null)
@@ -118,7 +119,6 @@ const canStartAnalysis = computed(() => {
 
   return Boolean(item?.key && item.status === 'uploaded' && !isUploading.value && !isAnalyzing.value)
 })
-const analysisEntries = computed(() => Object.entries(analysisResult.value ?? {}))
 const indicatorEntries = computed(() => Object.entries(indicatorResult.value ?? {}))
 const indicatorCards = computed<IndicatorCardItem[]>(() => {
   return indicatorEntries.value
@@ -181,7 +181,6 @@ const getContentType = (file: File, kind: ImagingKind) => {
 const resetAnalysis = () => {
   analysisStatus.value = 'idle'
   analysisError.value = ''
-  analysisResult.value = null
   indicatorResult.value = null
 }
 
@@ -217,12 +216,7 @@ const formatMetricValue = (value: unknown): string => {
     return formatResultValue(value)
   }
 
-  const fractionDigits = Math.abs(value) >= 100 ? 1 : 3
-
-  return value
-    .toFixed(fractionDigits)
-    .replace(/\.0+$/, '')
-    .replace(/(\.\d*?)0+$/, '$1')
+  return value.toFixed(4)
 }
 
 const getIndicatorTitle = (key: string) => indicatorTitles[key] ?? formatResultLabel(key)
@@ -642,7 +636,6 @@ const startAnalysis = async () => {
       skip_existing: false,
     })
 
-    analysisResult.value = analysisPayload
     indicatorResult.value = extractIndicatorResult(analysisPayload)
     analysisStatus.value = 'completed'
   } catch (error) {
@@ -986,16 +979,6 @@ const startAnalysis = async () => {
                     </div>
                   </div>
                 </div>
-
-                <details v-if="analysisEntries.length" class="rounded-2xl border border-white/10 bg-white/5 p-4 text-sm text-slate-300">
-                  <summary class="cursor-pointer font-medium text-white">Analyze API 回應</summary>
-                  <div class="mt-3 space-y-2">
-                    <div v-for="[key, value] in analysisEntries" :key="key" class="grid gap-1">
-                      <span class="text-slate-500">{{ formatResultLabel(key) }}</span>
-                      <span class="break-words text-slate-200">{{ formatResultValue(value) }}</span>
-                    </div>
-                  </div>
-                </details>
               </div>
             </div>
           </CardContent>
