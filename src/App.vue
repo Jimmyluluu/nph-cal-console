@@ -694,9 +694,9 @@ const startAnalysis = async () => {
         </div>
       </div>
 
-      <div class="grid gap-6 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+      <div class="grid gap-6 lg:grid-cols-[minmax(300px,0.82fr)_minmax(420px,1.18fr)]">
         <Card class="overflow-hidden border-white/70 bg-white/85 shadow-sm backdrop-blur">
-          <CardHeader>
+          <CardHeader class="pb-3">
             <CardTitle class="flex items-center gap-2 text-2xl">
               <UploadCloudIcon class="size-6 text-sky-600" />
               單案例上傳
@@ -705,18 +705,18 @@ const startAnalysis = async () => {
               可以選擇一個 NIfTI/ZIP 檔，也可以選擇整個 DICOM folder 並壓縮成單一 ZIP。
             </CardDescription>
           </CardHeader>
-          <CardContent class="space-y-5">
+          <CardContent class="space-y-4">
             <div
-              class="rounded-3xl border border-dashed p-4 transition-all sm:p-5"
+              class="rounded-3xl border border-dashed p-4 transition-all"
               :class="isDragging ? 'border-sky-500 bg-sky-50 shadow-inner' : 'border-slate-300 bg-slate-50/80'"
               @dragenter.prevent="isDragging = true"
               @dragover.prevent="isDragging = true"
               @dragleave.prevent="isDragging = false"
               @drop.prevent="handleDrop"
             >
-              <div class="mb-5 flex flex-col gap-2 text-center">
-                <div class="mx-auto grid size-16 place-items-center rounded-3xl bg-slate-950 text-white shadow-lg shadow-slate-950/20">
-                  <UploadCloudIcon class="size-8" />
+              <div class="mb-4 flex flex-col gap-2 text-center">
+                <div class="mx-auto grid size-14 place-items-center rounded-2xl bg-slate-950 text-white shadow-lg shadow-slate-950/20">
+                  <UploadCloudIcon class="size-7" />
                 </div>
                 <h2 class="text-2xl font-semibold text-slate-950">選擇你的 3D 影像來源</h2>
                 <p class="text-sm leading-6 text-slate-500">
@@ -727,11 +727,11 @@ const startAnalysis = async () => {
               <div class="grid gap-3 md:grid-cols-2">
                 <button
                   type="button"
-                  class="group rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
+                  class="group rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
                   :disabled="isCompressing || isUploading || isAnalyzing"
                   @click="openFolderPicker"
                 >
-                  <span class="mb-4 grid size-12 place-items-center rounded-2xl bg-sky-100 text-sky-700 transition group-hover:bg-sky-600 group-hover:text-white">
+                  <span class="mb-3 grid size-11 place-items-center rounded-2xl bg-sky-100 text-sky-700 transition group-hover:bg-sky-600 group-hover:text-white">
                     <FolderOpenIcon class="size-6" />
                   </span>
                   <span class="block text-lg font-semibold text-slate-950">我有一整個 folder</span>
@@ -745,11 +745,11 @@ const startAnalysis = async () => {
 
                 <button
                   type="button"
-                  class="group rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
+                  class="group rounded-2xl border bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:border-slate-400 hover:shadow-md disabled:pointer-events-none disabled:opacity-60"
                   :disabled="isCompressing || isUploading || isAnalyzing"
                   @click="openFilePicker"
                 >
-                  <span class="mb-4 grid size-12 place-items-center rounded-2xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white">
+                  <span class="mb-3 grid size-11 place-items-center rounded-2xl bg-slate-100 text-slate-700 transition group-hover:bg-slate-950 group-hover:text-white">
                     <FileScanIcon class="size-6" />
                   </span>
                   <span class="block text-lg font-semibold text-slate-950">我已經有檔案或壓縮檔</span>
@@ -794,7 +794,7 @@ const startAnalysis = async () => {
               {{ errorMessage }}
             </p>
 
-            <div class="space-y-4 rounded-2xl border bg-white px-4 py-4">
+            <div class="space-y-3 rounded-2xl border bg-white px-4 py-3">
               <div class="flex flex-wrap items-center justify-between gap-3">
                 <div class="flex flex-wrap items-center gap-2 text-sm text-slate-600">
                   <Badge variant="secondary">總大小 {{ formatFileSize(totalSize) }}</Badge>
@@ -957,7 +957,7 @@ const startAnalysis = async () => {
                     </Badge>
                   </div>
 
-                  <div class="grid gap-3 lg:grid-cols-3">
+                  <div class="grid gap-3 lg:grid-cols-[0.85fr_1.2fr_0.95fr]">
                     <div
                       v-for="indicator in primaryIndicatorCards"
                       :key="indicator.key"
